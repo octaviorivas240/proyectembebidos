@@ -1,0 +1,24 @@
+name: wardriving_live
+description: App Flutter - Visualización en tiempo real de Wardriving
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_map: ^6.0.0
+  latlong2: ^0.9.0
+  mqtt_client: ^10.0.0
+  shared_preferences: ^2.2.2
+  flutter_dotenv: ^5.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^2.0.0
+
+flutter:
+  uses-material-design: true

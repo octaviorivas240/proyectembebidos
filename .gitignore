@@ -1,0 +1,89 @@
+# ═══════════════════════════════════════════════════════════
+#  CREDENCIALES Y ARCHIVOS SENSIBLES - NUNCA SUBIR A GITHUB
+# ═══════════════════════════════════════════════════════════
+.env
+config.dart
+lib/config.dart
+*.key
+*.pem
+*.crt
+secrets/
+credentials/
+
+# Archivos generados por la Raspberry Pi Pico (MicroPython)
+# (si los bajas al PC para pruebas)
+wifi_networks.txt
+datos_wifi.txt
+*.csv
+*.log
+*.txt
+
+# ═══════════════════════════════════════════════════════════
+#  FLUTTER / DART
+# ═══════════════════════════════════════════════════════════
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+.pub/
+build/
+coverage/
+*.iml
+*.idea/
+*.vscode/
+*.log
+
+# Android
+android/app/debug/
+android/app/profile/
+android/app/release/
+android/.gradle/
+android/local.properties
+
+# iOS
+ios/Flutter/Generated.xcconfig
+ios/Flutter/flutter_export_environment.sh
+ios/.symlinks/
+ios/Pods/
+ios/Runner.xcworkspace/
+ios/Runner/GeneratedPluginRegistrant.*
+
+# macOS / Windows / Linux (si generas para desktop)
+macos/
+windows/
+linux/
+
+# Archivos temporales
+*.tmp
+*.temp
+*.bak
+*.swp
+*~
+
+# Bases de datos locales (si llegas a usar SQLite)
+*.db
+*.sqlite
+*.sqlite3
+
+# Archivos de compilación
+**/build/
+**/ios/Build/
+**/android/app/build/
+
+# Documentos personales o capturas que no quieres subir
+capturas/
+fotos/
+videos/
+*.mp4
+*.jpg
+*.png
+*.pdf
+
+# IDEs
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
