@@ -26,22 +26,29 @@ class _KMeansScreenState extends State<KMeansScreen> {
         double minDist = double.infinity;
         int best = 0;
         for (int c = 0; c < k; c++) {
-          double d = (points[i].latitude - clat[c]).abs() + (points[i].longitude - clon[c]).abs();
-          if (d < minDist) { minDist = d; best = c; }
+          double d = (points[i].latitude - clat[c]).abs() +
+              (points[i].longitude - clon[c]).abs();
+          if (d < minDist) {
+            minDist = d;
+            best = c;
+          }
         }
         labels[i] = best;
       }
       List<int> count = List.filled(k, 0);
-      clat = List.filled(k, 0); clon = List.filled(k, 0);
+      clat = List.filled(k, 0);
+      clon = List.filled(k, 0);
       for (int i = 0; i < n; i++) {
         int c = labels[i];
         clat[c] += points[i].latitude;
         clon[c] += points[i].longitude;
         count[c]++;
       }
-      for (int c = 0; c < k; c++) if (count[c] > 0) {
-        clat[c] /= count[c];
-        clon[c] /= count[c];
+      for (int c = 0; c < k; c++) {
+        if (count[c] > 0) {
+          clat[c] /= count[c];
+          clon[c] /= count[c];
+        }
       }
     }
     return labels;
@@ -51,7 +58,14 @@ class _KMeansScreenState extends State<KMeansScreen> {
   Widget build(BuildContext context) {
     final insecure = widget.points.where((p) => p.isInsecure).toList();
     final labels = _kmeans(insecure, k);
-    final colors = [Colors.red, Colors.blue, Colors.green, Colors.purple, Colors.orange, Colors.cyan];
+    final colors = [
+      Colors.red,
+      Colors.blue,
+      Colors.green,
+      Colors.purple,
+      Colors.orange,
+      Colors.cyan
+    ];
 
     final markers = insecure.asMap().entries.map((e) {
       final p = e.value;
@@ -66,23 +80,35 @@ class _KMeansScreenState extends State<KMeansScreen> {
             shape: BoxShape.circle,
             border: Border.all(color: Colors.white, width: 3),
           ),
-          child: Center(child: Text("$cluster", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18))),
+          child: Center(
+              child: Text("$cluster",
+                  style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18))),
         ),
       );
     }).toList();
 
     return Scaffold(
       body: insecure.isEmpty
-          ? Center(child: Text("No hay redes inseguras", style: TextStyle(fontSize: 22)))
+          ? const Center(
+              child: Text("No hay redes inseguras",
+                  style: TextStyle(fontSize: 22)))
           : FlutterMap(
-              options: MapOptions(center: LatLng(insecure[0].latitude, insecure[0].longitude), zoom: 14),
+              options: MapOptions(
+                  center: LatLng(insecure[0].latitude, insecure[0].longitude),
+                  zoom: 14),
               children: [
-                TileLayer(urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', subdomains: ['a','b','c']),
+                TileLayer(
+                    urlTemplate:
+                        'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+                    subdomains: const ['a', 'b', 'c']),
                 MarkerLayer(markers: markers),
               ],
             ),
       floatingActionButton: FloatingActionButton(
-        child: Text("$k", style: TextStyle(fontSize: 20)),
+        child: Text("$k", style: const TextStyle(fontSize: 20)),
         onPressed: () => setState(() => k = k >= 6 ? 2 : k + 1),
       ),
     );
