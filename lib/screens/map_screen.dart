@@ -1,169 +1,214 @@
+// lib/screens/map_screen.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../models/wifi_point.dart';
-import '../services/mqtt_service.dart';
-import '../services/storage_service.dart';
+import '../config.dart';
 
 class MapScreen extends StatefulWidget {
   final Function(List<WifiPoint>) onPointsUpdate;
-  const MapScreen({super.key, required this.onPointsUpdate});
+  const MapScreen({Key? key, required this.onPointsUpdate}) : super(key: key);
 
   @override
   State<MapScreen> createState() => _MapScreenState();
 }
 
 class _MapScreenState extends State<MapScreen> {
-  final mqtt = MQTTService();
-  List<WifiPoint> points = [];
-  bool showOnlyInsecure = false;
+  List<WifiPoint> allPoints = [];
+  bool showOnlyOpen = false;
+  late MapController _mapController;
 
   @override
   void initState() {
     super.initState();
-    _loadData();
-    mqtt.onNewData = (newPoints) {
-      setState(() {
-        points.addAll(newPoints);
-        StorageService.save(points);
-        widget.onPointsUpdate(points); // Envía datos al menú principal y K-Means
-      });
-    };
-    mqtt.connect(); // Aquí se usan las claves desde config.dart (en mqtt_service.dart)
+    _mapController = MapController();
+    _loadPoints();
+
+    // Recarga cada 12 segundos
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(seconds: 12));
+      if (mounted) await _loadPoints();
+      return mounted;
+    });
   }
 
-  Future<void> _loadData() async {
-    final cached = await StorageService.load();
-    if (cached.isNotEmpty) {
-      setState(() {
-        points = cached;
-        widget.onPointsUpdate(points);
-      });
+  Future<void> _loadPoints() async {
+    try {
+      final url =
+          'https://io.adafruit.com/api/v2/${Config.username}/feeds/${Config.feed}/data?limit=100';
+      final response = await http.get(
+        Uri.parse(url),
+        headers: {'X-AIO-Key': Config.aioKey},
+      );
+
+      if (response.statusCode != 200) return;
+
+      final List<dynamic> items = json.decode(response.body);
+      final List<WifiPoint> loaded = [];
+
+      for (var item in items) {
+        final String? raw = item['value'] as String?;
+        if (raw == null || raw.trim().isEmpty) continue;
+
+        final lines = raw.split('\n');
+        for (var line in lines) {
+          line = line.trim();
+          if (line.isEmpty) continue;
+          try {
+            loaded.add(WifiPoint.fromCsv(line));
+          } catch (e) {
+            // Ignora línea rota
+            continue;
+          }
+        }
+      }
+
+      if (loaded.isNotEmpty && mounted) {
+        setState(() {
+          allPoints = loaded;
+          widget.onPointsUpdate(loaded);
+        });
+
+        // Guardar en caché (usando toString o manual porque no tienes toJson)
+        final prefs = await SharedPreferences.getInstance();
+        final cacheData = loaded
+            .map((p) => {
+                  'ssid': p.ssid,
+                  'security': p.security,
+                  'lat': p.latitude,
+                  'lng': p.longitude,
+                  'signal': p.signal,
+                  'mac': p.mac,
+                })
+            .toList();
+        await prefs.setString('cached_points', jsonEncode(cacheData));
+
+        // Centrar mapa si hay pocos puntos
+        if (loaded.length == 1) {
+          _mapController.move(
+              LatLng(loaded[0].latitude, loaded[0].longitude), 16.0);
+        }
+      }
+    } catch (e) {
+      debugPrint("Error cargando datos: $e");
+      await _loadFromCache();
     }
   }
 
-  List<Marker> _buildMarkers() {
-    final filtered = showOnlyInsecure
-        ? points.where((p) => p.isInsecure).toList()
-        : points;
+  Future<void> _loadFromCache() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final String? data = prefs.getString('cached_points');
+      if (data != null && mounted) {
+        final List list = json.decode(data);
+        final cached = list.map((e) {
+          return WifiPoint(
+            ssid: e['ssid'],
+            security: e['security'],
+            latitude: (e['lat'] as num).toDouble(),
+            longitude: (e['lng'] as num).toDouble(),
+            signal: e['signal'],
+            mac: e['mac'],
+            timestamp: DateTime.now(),
+          );
+        }).toList();
 
-    return filtered.map((p) {
-      final color = p.isInsecure ? Colors.red : Colors.green;
-      final size = p.signal > -70 ? 42.0 : 32.0;
-
-      return Marker(
-        point: LatLng(p.latitude, p.longitude),
-        width: size,
-        height: size,
-        child: GestureDetector(
-          onTap: () => _showInfo(p),
-          child: Icon(
-            Icons.location_on,
-            color: color,
-            size: size,
-            shadows: const [Shadow(blurRadius: 10, color: Colors.black45)],
-          ),
-        ),
-      );
-    }).toList();
+        setState(() {
+          allPoints = cached;
+          widget.onPointsUpdate(cached);
+        });
+      }
+    } catch (_) {}
   }
 
-  void _showInfo(WifiPoint p) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(p.ssid, style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+  void _toggleFilter() => setState(() => showOnlyOpen = !showOnlyOpen);
+
+  int get displayedCount => showOnlyOpen
+      ? allPoints.where((p) => p.isInsecure).length
+      : allPoints.length;
+
+  List<WifiPoint> get displayedPoints =>
+      showOnlyOpen ? allPoints.where((p) => p.isInsecure).toList() : allPoints;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        FlutterMap(
+          mapController: _mapController,
+          options: const MapOptions(
+            initialCenter: LatLng(19.4326, -99.1332),
+            initialZoom: 14.0,
+          ),
           children: [
-            _infoRow(Icons.security, "Seguridad", p.security),
-            _infoRow(Icons.signal_wifi_4_bar, "Señal", "${p.signal} dBm"),
-            _infoRow(Icons.phonelink, "MAC", p.mac),
-            _infoRow(Icons.location_on, "Coordenadas", "${p.latitude.toStringAsFixed(6)}, ${p.longitude.toStringAsFixed(6)}"),
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.wardriving.live',
+            ),
+            MarkerLayer(
+              markers: displayedPoints.map((p) {
+                return Marker(
+                  point: LatLng(p.latitude, p.longitude),
+                  width: 40,
+                  height: 40,
+                  child: Icon(
+                    Icons.circle,
+                    color: p.isInsecure ? Colors.red : Colors.green,
+                    size: 32,
+                    shadows: const [
+                      Shadow(blurRadius: 8, color: Colors.black54)
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
           ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text("Cerrar"),
-          ),
-        ],
-      ),
-    );
-  }
 
-  Widget _infoRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: Colors.white70),
-          const SizedBox(width: 8),
-          Text("$label: ", style: const TextStyle(fontWeight: FontWeight.bold)),
-          Expanded(child: Text(value)),
-        ],
-      ),
+        // Contador
+        Positioned(
+          bottom: 90,
+          left: 20,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: BoxDecoration(
+              color: showOnlyOpen ? Colors.red.shade800 : Colors.green.shade700,
+              borderRadius: BorderRadius.circular(30),
+              boxShadow: const [
+                BoxShadow(color: Colors.black54, blurRadius: 10)
+              ],
+            ),
+            child: Text(
+              "$displayedCount ${showOnlyOpen ? 'redes abiertas' : 'redes'}",
+              style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16),
+            ),
+          ),
+        ),
+
+        // Botón filtro
+        Positioned(
+          bottom: 90,
+          right: 20,
+          child: FloatingActionButton(
+            heroTag: "filter_btn",
+            backgroundColor: showOnlyOpen ? Colors.red : Colors.green,
+            onPressed: _toggleFilter,
+            child: const Icon(Icons.shield, color: Colors.white, size: 32),
+          ),
+        ),
+      ],
     );
   }
 
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: points.isEmpty
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(strokeWidth: 3),
-                  SizedBox(height: 20),
-                  Text("Conectando al Pico W...", style: TextStyle(fontSize: 16)),
-                ],
-              ),
-            )
-          : FlutterMap(
-              options: MapOptions(
-                initialCenter: LatLng(
-                  points.last.latitude,
-                  points.last.longitude,
-                ),
-                initialZoom: 16.5,
-                maxZoom: 19,
-              ),
-              children: [
-                TileLayer(
-                  urlTemplate: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-                  subdomains: const ['a', 'b', 'c'],
-                  userAgentPackageName: 'dev.octavio.wardriving',
-                ),
-                MarkerLayer(markers: _buildMarkers()),
-              ],
-            ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          FloatingActionButton(
-            heroTag: "filter",
-            backgroundColor: showOnlyInsecure ? Colors.red.shade700 : Colors.grey.shade700,
-            tooltip: "Mostrar solo redes inseguras",
-            child: Icon(showOnlyInsecure ? Icons.security : Icons.wifi),
-            onPressed: () => setState(() => showOnlyInsecure = !showOnlyInsecure),
-          ),
-          const SizedBox(height: 12),
-          FloatingActionButton(
-            heroTag: "clear",
-            backgroundColor: Colors.deepPurple,
-            tooltip: "Limpiar todos los datos",
-            child: const Icon(Icons.delete_forever),
-            onPressed: () async {
-              await StorageService.clear();
-              setState(() => points.clear());
-              widget.onPointsUpdate([]);
-            },
-          ),
-        ],
-      ),
-    );
+  void dispose() {
+    _mapController.dispose();
+    super.dispose();
   }
 }
