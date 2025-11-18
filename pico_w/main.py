@@ -56,7 +56,7 @@ def conectar_wifi():
     return False
 
 def enviar_a_adafruit(datos):
-    url = f"https://io.adafruit.com/api/v2/{aio_user}/feeds/{feed}/data"
+    url = f"http://io.adafruit.com/api/v2/{aio_user}/feeds/{feed}/data"
     headers = {"X-AIO-Key": aio_key, "Content-Type": "application/json"}
     try:
         r = urequests.post(url, json={"value": datos}, headers=headers)
