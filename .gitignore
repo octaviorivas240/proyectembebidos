@@ -17,7 +17,20 @@ datos_wifi.txt
 *.csv
 *.log
 *.txt
+# Claves - NUNCA subir
+config.py
+secrets.py
+*.key
 
+# Archivos de datos
+*.txt
+*.csv
+*.log
+
+# Thonny / backups
+__pycache__/
+*.py.bak
+*.pyc
 # ═══════════════════════════════════════════════════════════
 #  FLUTTER / DART
 # ═══════════════════════════════════════════════════════════
@@ -33,12 +46,6 @@ coverage/
 *.vscode/
 *.log
 
-# Android
-android/app/debug/
-android/app/profile/
-android/app/release/
-android/.gradle/
-android/local.properties
 
 # iOS
 ios/Flutter/Generated.xcconfig
@@ -47,11 +54,6 @@ ios/.symlinks/
 ios/Pods/
 ios/Runner.xcworkspace/
 ios/Runner/GeneratedPluginRegistrant.*
-
-# macOS / Windows / Linux (si generas para desktop)
-macos/
-windows/
-linux/
 
 # Archivos temporales
 *.tmp
@@ -87,3 +89,9 @@ videos/
 *.njsproj
 *.sln
 *.sw?
+# Claves y datos sensibles
+config.py
+*.txt
+*.csv
+*.log
+__pycache__/
