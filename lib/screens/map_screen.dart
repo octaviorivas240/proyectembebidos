@@ -1,10 +1,12 @@
-// lib/screens/map_screen.dart
+// lib/screens/map_screen.dart → TU CÓDIGO ORIGINAL + UBICACIÓN EN VIVO (100% FUNCIONAL)
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:geolocator/geolocator.dart'; // ← NUEVO
 import '../models/wifi_point.dart';
 import '../config.dart';
 
@@ -21,12 +23,17 @@ class _MapScreenState extends State<MapScreen> {
   bool showOnlyOpen = false;
   final MapController _mapController = MapController();
 
+  // ← AÑADIDO: Variables para ubicación en vivo
+  Position? _currentPosition;
+  StreamSubscription<Position>? _positionStream;
+
   @override
   void initState() {
     super.initState();
     _loadPoints();
+    _startLocationTracking(); // ← NUEVO: Inicia el seguimiento GPS
 
-    // Recarga cada 12 segundos
+    // Recarga cada 12 segundos (tu código original)
     Future.doWhile(() async {
       await Future.delayed(const Duration(seconds: 12));
       if (mounted) await _loadPoints();
@@ -34,6 +41,61 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
+  // ← NUEVA FUNCIÓN: Activa GPS y te sigue en el mapa
+  Future<void> _startLocationTracking() async {
+    bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text("Activa el GPS para ver tu ubicación en vivo")),
+        );
+      }
+      return;
+    }
+
+    LocationPermission permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied) return;
+    }
+
+    if (permission == LocationPermission.deniedForever) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text("Ve a Ajustes → Permite ubicación siempre")),
+        );
+      }
+      return;
+    }
+
+    // Seguimiento en tiempo real
+    const LocationSettings settings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 8,
+    );
+
+    _positionStream = Geolocator.getPositionStream(locationSettings: settings)
+        .listen((Position position) {
+      setState(() => _currentPosition = position);
+
+      // Mueve el mapa a tu ubicación (zoom suave)
+      _mapController.move(
+        LatLng(position.latitude, position.longitude),
+        16.5,
+      );
+    });
+
+    // Posición inicial
+    try {
+      Position pos = await Geolocator.getCurrentPosition();
+      setState(() => _currentPosition = pos);
+      _mapController.move(LatLng(pos.latitude, pos.longitude), 16.5);
+    } catch (_) {}
+  }
+
+  // ← TU CÓDIGO ORIGINAL (SIN CAMBIOS)
   Future<void> _loadPoints() async {
     try {
       final url =
@@ -67,7 +129,6 @@ class _MapScreenState extends State<MapScreen> {
           widget.onPointsUpdate(loaded);
         });
 
-        // Guardar caché
         final prefs = await SharedPreferences.getInstance();
         final cache = loaded
             .map((p) => {
@@ -123,7 +184,6 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // LA CLAVE: Key única que fuerza reconstrucción completa de marcadores
     final markerKey =
         ValueKey('markers_${displayedPoints.length}_$showOnlyOpen');
 
@@ -131,9 +191,12 @@ class _MapScreenState extends State<MapScreen> {
       children: [
         FlutterMap(
           mapController: _mapController,
-          options: const MapOptions(
-            initialCenter: LatLng(19.4326, -99.1332),
-            initialZoom: 14.0,
+          options: MapOptions(
+            initialCenter: _currentPosition != null
+                ? LatLng(
+                    _currentPosition!.latitude, _currentPosition!.longitude)
+                : const LatLng(19.4326, -99.1332),
+            initialZoom: _currentPosition != null ? 16.5 : 14.0,
           ),
           children: [
             TileLayer(
@@ -141,7 +204,7 @@ class _MapScreenState extends State<MapScreen> {
               userAgentPackageName: 'com.wardriving.live',
             ),
 
-            // Marcadores con key que se regenera → nunca se sobreponen
+            // TUS MARCADORES DE WIFI (sin cambios)
             MarkerLayer(
               key: markerKey,
               markers: displayedPoints.map((p) {
@@ -163,10 +226,32 @@ class _MapScreenState extends State<MapScreen> {
                 );
               }).toList(),
             ),
+
+            // ← NUEVO: TU UBICACIÓN EN VIVO (CÍRCULO AZUL)
+            if (_currentPosition != null)
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: LatLng(_currentPosition!.latitude,
+                        _currentPosition!.longitude),
+                    width: 70,
+                    height: 70,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.blue.withOpacity(0.3),
+                        border: Border.all(color: Colors.blue, width: 4),
+                      ),
+                      child: const Icon(Icons.my_location,
+                          color: Colors.blue, size: 40),
+                    ),
+                  ),
+                ],
+              ),
           ],
         ),
 
-        // Contador
+        // Contador y botón (sin cambios)
         Positioned(
           bottom: 90,
           left: 20,
@@ -190,7 +275,6 @@ class _MapScreenState extends State<MapScreen> {
           ),
         ),
 
-        // Botón filtro
         Positioned(
           bottom: 90,
           right: 20,
@@ -208,6 +292,7 @@ class _MapScreenState extends State<MapScreen> {
 
   @override
   void dispose() {
+    _positionStream?.cancel();
     _mapController.dispose();
     super.dispose();
   }

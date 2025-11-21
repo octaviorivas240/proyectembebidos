@@ -12,7 +12,7 @@ import 'config.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // CARGAR .env DESDE ASSETS → FUNCIONA EN ANDROID, iOS, WINDOWS Y WEB
+  // CARGAR .env DESDE ASSETS
   try {
     await dotenv.load(fileName: "assets/.env");
     Config.validate();
@@ -20,10 +20,8 @@ Future<void> main() async {
   } catch (e) {
     debugPrint("Error cargando .env: $e");
     if (kIsWeb) {
-      debugPrint(
-          "Modo Web detectado → puedes usar credenciales de prueba aquí si quieres");
+      debugPrint("Web detectada → puedes usar credenciales de prueba");
     } else {
-      // En móvil o desktop, si no encuentra el .env → que explote para que lo veas
       rethrow;
     }
   }
@@ -37,13 +35,20 @@ class WardrivingPro extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Wardriving Pro',
+      title: 'Wardriving Pro México 2025',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         primarySwatch: Colors.deepPurple,
         useMaterial3: true,
         brightness: Brightness.dark,
-        scaffoldBackgroundColor: Colors.black,
+        scaffoldBackgroundColor: const Color(0xFF0E0E1A),
+        appBarTheme: AppBarTheme(
+          backgroundColor: Colors.deepPurple.shade800,
+          elevation: 6,
+          centerTitle: true,
+          titleTextStyle:
+              const TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+        ),
       ),
       home: const MainScaffold(),
     );
@@ -62,7 +67,9 @@ class _MainScaffoldState extends State<MainScaffold> {
   List<WifiPoint> allPoints = [];
 
   void _updatePoints(List<WifiPoint> points) {
-    setState(() => allPoints = points);
+    setState(() {
+      allPoints = points;
+    });
   }
 
   Widget _currentPage() {
@@ -70,11 +77,11 @@ class _MainScaffoldState extends State<MainScaffold> {
       case 0:
         return MapScreen(onPointsUpdate: _updatePoints);
       case 1:
-        return KMeansScreen(points: allPoints);
+        return KMeansScreen(allPoints: allPoints); // ← CORREGIDO
       case 2:
         return const AboutScreen();
       default:
-        return const SizedBox();
+        return const Center(child: Text("Error 404"));
     }
   }
 
@@ -84,38 +91,41 @@ class _MainScaffoldState extends State<MainScaffold> {
       appBar: AppBar(
         title: Text(
           ["Mapa en Vivo", "Análisis K-Means", "Acerca de"][_index],
-          style: const TextStyle(fontWeight: FontWeight.bold),
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 21),
         ),
-        centerTitle: true,
-        elevation: 4,
         backgroundColor: Colors.deepPurple.shade800,
+        elevation: 8,
+        shadowColor: Colors.deepPurpleAccent,
       ),
       drawer: Drawer(
-        child: ListView(
-          padding: EdgeInsets.zero,
-          children: [
-            const UserAccountsDrawerHeader(
-              decoration: BoxDecoration(color: Colors.deepPurple),
-              currentAccountPicture: CircleAvatar(
-                radius: 40,
-                backgroundColor: Colors.white,
-                child: Icon(Icons.wifi, size: 50, color: Colors.deepPurple),
+        child: Container(
+          color: const Color(0xFF1A1A2E),
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: [
+              UserAccountsDrawerHeader(
+                decoration: BoxDecoration(color: Colors.deepPurple.shade700),
+                currentAccountPicture: const CircleAvatar(
+                  radius: 40,
+                  backgroundColor: Colors.white,
+                  child: Icon(Icons.wifi, size: 50, color: Colors.deepPurple),
+                ),
+                accountName: const Text(
+                  "Wardriving Pro",
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                ),
+                accountEmail: const Text(
+                  "v2.0 • Tiempo Real + ML",
+                  style: TextStyle(fontSize: 14),
+                ),
               ),
-              accountName: Text(
-                "Wardriving Pro",
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-              accountEmail: Text(
-                "v2.0 • Tiempo Real + K-Means",
-                style: TextStyle(fontSize: 13),
-              ),
-            ),
-            _menuItem(Icons.map_outlined, "Mapa en Tiempo Real", 0),
-            _menuItem(Icons.analytics_outlined, "Análisis K-Means", 1),
-            _menuItem(Icons.info_outline, "Acerca de", 2),
-            const Divider(),
-            _menuItem(Icons.exit_to_app, "Salir", 3, color: Colors.redAccent),
-          ],
+              _menuItem(Icons.map_outlined, "Mapa en Tiempo Real", 0),
+              _menuItem(Icons.analytics_outlined, "Análisis K-Means", 1),
+              _menuItem(Icons.info_outline, "Acerca de", 2),
+              const Divider(color: Colors.white24),
+              _menuItem(Icons.exit_to_app, "Salir", 3, color: Colors.redAccent),
+            ],
+          ),
         ),
       ),
       body: _currentPage(),
@@ -125,6 +135,9 @@ class _MainScaffoldState extends State<MainScaffold> {
         backgroundColor: Colors.deepPurple.shade800,
         selectedItemColor: Colors.white,
         unselectedItemColor: Colors.white70,
+        selectedFontSize: 14,
+        unselectedFontSize: 12,
+        type: BottomNavigationBarType.fixed,
         items: const [
           BottomNavigationBarItem(icon: Icon(Icons.map), label: "Mapa"),
           BottomNavigationBarItem(
@@ -138,27 +151,35 @@ class _MainScaffoldState extends State<MainScaffold> {
   Widget _menuItem(IconData icon, String title, int index, {Color? color}) {
     return ListTile(
       leading: Icon(icon, color: color ?? Colors.white70),
-      title: Text(title, style: TextStyle(color: color ?? Colors.white)),
+      title: Text(title,
+          style: TextStyle(color: color ?? Colors.white, fontSize: 16)),
       selected: _index == index,
-      selectedTileColor: Colors.deepPurple.withOpacity(0.3),
+      selectedTileColor: Colors.deepPurple.withAlpha(80),
+      selectedColor: Colors.white,
       onTap: () {
         if (index == 3) {
           showDialog(
             context: context,
             builder: (_) => AlertDialog(
               backgroundColor: Colors.grey[900],
-              title: const Text("Salir", style: TextStyle(color: Colors.white)),
-              content: const Text("¿Cerrar la app?",
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16)),
+              title: const Text("Salir",
+                  style: TextStyle(
+                      color: Colors.white, fontWeight: FontWeight.bold)),
+              content: const Text("¿Cerrar Wardriving Pro?",
                   style: TextStyle(color: Colors.white70)),
               actions: [
                 TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text("No",
-                        style: TextStyle(color: Colors.white70))),
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text("Cancelar",
+                      style: TextStyle(color: Colors.white70)),
+                ),
                 TextButton(
                   onPressed: () =>
                       Navigator.popUntil(context, (r) => r.isFirst),
-                  child: const Text("Sí", style: TextStyle(color: Colors.red)),
+                  child: const Text("Salir",
+                      style: TextStyle(color: Colors.redAccent)),
                 ),
               ],
             ),

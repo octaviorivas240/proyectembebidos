@@ -1,184 +1,285 @@
 // lib/screens/kmeans_screen.dart
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import '../models/wifi_point.dart';
 
 class KMeansScreen extends StatefulWidget {
-  final List<WifiPoint> points;
-  const KMeansScreen({Key? key, required this.points}) : super(key: key);
+  final List<WifiPoint> allPoints;
+
+  const KMeansScreen({Key? key, required this.allPoints}) : super(key: key);
 
   @override
   State<KMeansScreen> createState() => _KMeansScreenState();
 }
 
 class _KMeansScreenState extends State<KMeansScreen> {
-  late final MapController _mapController;
+  List<Cluster> clusters = [];
+  int k = 4; // Número de clusters (puedes cambiarlo)
 
   @override
   void initState() {
     super.initState();
-    _mapController = MapController();
+    _runKMeans();
   }
 
-  @override
-  void didUpdateWidget(KMeansScreen oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    // Ajustar cámara cuando cambien los puntos
-    if (widget.points.isNotEmpty) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        final bounds = _calculateBounds(widget.points);
-        _mapController.fitCamera(
-          CameraFit.bounds(
-            bounds: bounds,
-            padding: const EdgeInsets.all(60),
-          ),
-        );
-      });
+  void _runKMeans() {
+    final openPoints = widget.allPoints.where((p) => p.isInsecure).toList();
+    if (openPoints.isEmpty) {
+      setState(() => clusters = []);
+      return;
     }
+
+    clusters = kMeans(openPoints, k);
+    setState(() {});
   }
 
   @override
   Widget build(BuildContext context) {
-    if (widget.points.isEmpty) {
-      return const Center(
-        child: Text(
-          "No hay datos para analizar\nEscanea redes primero",
-          textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 20, color: Colors.white70),
-        ),
-      );
-    }
+    final openCount = widget.allPoints.where((p) => p.isInsecure).length;
+    final colors = [
+      Colors.red,
+      Colors.orange,
+      Colors.purple,
+      Colors.deepOrange,
+      Colors.pink
+    ];
 
-    final clusters = _runKMeans(widget.points, 4);
-
-    return FlutterMap(
-      mapController: _mapController,
-      options: const MapOptions(
-        initialCenter: LatLng(19.4326, -99.1332),
-        initialZoom: 14,
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("K-Means - Redes Inseguras"),
+        backgroundColor: Colors.deepPurple,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _runKMeans,
+          ),
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+              child: Text("K = $k",
+                  style: const TextStyle(
+                      fontSize: 18, fontWeight: FontWeight.bold)),
+            ),
+          ),
+        ],
       ),
-      children: [
-        TileLayer(
-          urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-          userAgentPackageName: 'com.example.wardriving_live',
-        ),
-        MarkerLayer(
-          markers: widget.points.map((p) {
-            final cluster = clusters.firstWhere(
-              (c) => c['points'].contains(p),
-              orElse: () => {'color': Colors.grey},
-            );
-            return Marker(
-              point: LatLng(p.latitude, p.longitude),
-              width: 40,
-              height: 40,
-              child: Icon(
-                Icons.location_on,
-                color: cluster['color'] as Color,
-                size: 40,
-                shadows: const [Shadow(color: Colors.black, blurRadius: 10)],
-              ),
-            );
-          }).toList(),
-        ),
-        CircleLayer(
-          circles: clusters.map((c) {
-            final centerPoint = c['center'] as WifiPoint;
-            return CircleMarker(
-              point: LatLng(centerPoint.latitude, centerPoint.longitude),
-              radius: 60,
-              useRadiusInMeter: false,
-              color: (c['color'] as Color).withAlpha(80),
-              borderColor: c['color'] as Color,
-              borderStrokeWidth: 4,
-            );
-          }).toList(),
-        ),
-      ],
+      body: Column(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: Colors.deepPurple.shade50,
+            child: Column(
+              children: [
+                Text(
+                  "Análisis de $openCount redes abiertas/WEP",
+                  style: const TextStyle(
+                      fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Se formaron ${clusters.length} clusters de alta concentración",
+                  style: const TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: clusters.map((c) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      child: Row(
+                        children: [
+                          Icon(Icons.circle, color: c.color, size: 20),
+                          const SizedBox(width: 4),
+                          Text("${c.points.length} redes"),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ],
+            ),
+          ),
+          Expanded(
+            child: clusters.isEmpty
+                ? const Center(
+                    child: Text(
+                      "No hay redes abiertas detectadas\n¡Excelente seguridad en la zona!",
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 18, color: Colors.green),
+                    ),
+                  )
+                : FlutterMap(
+                    options: const MapOptions(
+                      initialCenter: LatLng(19.4326, -99.1332),
+                      initialZoom: 12.5,
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate:
+                            'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'com.wardriving.live',
+                      ),
+                      MarkerLayer(
+                        markers: clusters.expand((cluster) {
+                          return cluster.points.map((p) {
+                            return Marker(
+                              point: LatLng(p.latitude, p.longitude),
+                              width: 50,
+                              height: 50,
+                              child: Icon(
+                                Icons.dangerous,
+                                color: cluster.color.withOpacity(0.9),
+                                size: 40,
+                                shadows: const [
+                                  Shadow(
+                                      color: Colors.black87,
+                                      blurRadius: 10,
+                                      offset: Offset(0, 2))
+                                ],
+                              ),
+                            );
+                          });
+                        }).toList(),
+                      ),
+                      // Centroides grandes
+                      MarkerLayer(
+                        markers: clusters.map((c) {
+                          return Marker(
+                            point: c.centroid,
+                            width: 80,
+                            height: 80,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                color: c.color.withOpacity(0.3),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: c.color, width: 4),
+                              ),
+                              child: Center(
+                                child: Text(
+                                  "${c.points.length}",
+                                  style: TextStyle(
+                                    color: c.color,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 24,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: Colors.deepPurple,
+        child: const Icon(Icons.add),
+        onPressed: () {
+          setState(() {
+            k = k < 8 ? k + 1 : 3;
+            _runKMeans();
+          });
+        },
+      ),
     );
   }
+}
 
-  // === K-MEANS Y UTILIDADES (sin cambios) ===
-  List<Map<String, dynamic>> _runKMeans(List<WifiPoint> points, int k) {
-    if (points.isEmpty) return [];
+// ================== K-MEANS REAL (no dummy) ==================
+class Cluster {
+  final List<WifiPoint> points;
+  final Color color;
+  late LatLng centroid;
 
-    List<WifiPoint> centroids = List.from(points)..shuffle();
-    centroids = centroids.take(k).toList();
+  Cluster(this.points, this.color) {
+    centroid = _calculateCentroid();
+  }
 
-    List<Map<String, dynamic>> clusters = [];
-    bool changed = true;
+  LatLng _calculateCentroid() {
+    double lat = 0, lng = 0;
+    for (var p in points) {
+      lat += p.latitude;
+      lng += p.longitude;
+    }
+    return LatLng(lat / points.length, lng / points.length);
+  }
+}
 
-    while (changed) {
-      clusters = List.generate(
-          k, (i) => {'points': <WifiPoint>[], 'color': _getColor(i)});
-      for (var point in points) {
-        int closest = 0;
-        double minDist = double.infinity;
-        for (int i = 0; i < centroids.length; i++) {
-          final dist = _distance(point, centroids[i]);
-          if (dist < minDist) {
-            minDist = dist;
-            closest = i;
-          }
-        }
-        clusters[closest]['points'].add(point);
-      }
+List<Cluster> kMeans(List<WifiPoint> points, int k) {
+  if (points.isEmpty || k <= 0) return [];
 
-      changed = false;
+  final random = Random();
+  final colors = [
+    Colors.red,
+    Colors.orange,
+    Colors.purple,
+    Colors.deepOrange,
+    Colors.pink,
+    Colors.teal,
+    Colors.amber,
+    Colors.cyan
+  ];
+
+  // Inicializar centroides aleatorios
+  List<LatLng> centroids = [];
+  for (int i = 0; i < k; i++) {
+    final p = points[random.nextInt(points.length)];
+    centroids.add(LatLng(p.latitude, p.longitude));
+  }
+
+  // Iterar 10 veces (suficiente)
+  for (int iter = 0; iter < 10; iter++) {
+    List<List<WifiPoint>> groups = List.generate(k, (_) => []);
+    for (var point in points) {
+      double minDist = double.infinity;
+      int best = 0;
       for (int i = 0; i < k; i++) {
-        final clusterPoints = clusters[i]['points'] as List<WifiPoint>;
-        if (clusterPoints.isEmpty) continue;
-        final newCenter = WifiPoint(
-          ssid: 'centroid',
-          security: '',
-          latitude:
-              clusterPoints.map((p) => p.latitude).reduce((a, b) => a + b) /
-                  clusterPoints.length,
-          longitude:
-              clusterPoints.map((p) => p.longitude).reduce((a, b) => a + b) /
-                  clusterPoints.length,
-          signal: 0,
-          mac: '',
-          timestamp: DateTime.now(),
-        );
-        if (_distance(newCenter, centroids[i]) > 0.0001) {
-          changed = true;
-          centroids[i] = newCenter;
+        final dist = _distance(point, centroids[i]);
+        if (dist < minDist) {
+          minDist = dist;
+          best = i;
         }
-        clusters[i]['center'] = centroids[i];
+      }
+      groups[best].add(point);
+    }
+
+    // Recalcular centroides
+    for (int i = 0; i < k; i++) {
+      if (groups[i].isNotEmpty) {
+        double lat = 0, lng = 0;
+        for (var p in groups[i]) {
+          lat += p.latitude;
+          lng += p.longitude;
+        }
+        centroids[i] = LatLng(lat / groups[i].length, lng / groups[i].length);
       }
     }
-
-    return clusters;
   }
 
-  double _distance(WifiPoint a, WifiPoint b) {
-    return (a.latitude - b.latitude).abs() + (a.longitude - b.longitude).abs();
-  }
-
-  Color _getColor(int index) {
-    const colors = [Colors.red, Colors.blue, Colors.yellow, Colors.purple];
-    return colors[index % colors.length];
-  }
-
-  LatLngBounds _calculateBounds(List<WifiPoint> points) {
-    if (points.isEmpty) {
-      return LatLngBounds(const LatLng(0, 0), const LatLng(0, 0));
+  // Crear clusters finales
+  List<Cluster> result = [];
+  for (int i = 0; i < k; i++) {
+    final group = <WifiPoint>[];
+    for (var point in points) {
+      if (_distance(point, centroids[i]) <
+          _distance(point, centroids[result.length])) {
+        group.add(point);
+      }
     }
-    final lats = points.map((p) => p.latitude);
-    final lngs = points.map((p) => p.longitude);
-    return LatLngBounds(
-      LatLng(lats.reduce((a, b) => a < b ? a : b),
-          lngs.reduce((a, b) => a < b ? a : b)),
-      LatLng(lats.reduce((a, b) => a > b ? a : b),
-          lngs.reduce((a, b) => a > b ? a : b)),
-    );
+    if (group.isNotEmpty) {
+      result.add(Cluster(group, colors[i % colors.length]));
+    }
   }
 
-  @override
-  void dispose() {
-    _mapController.dispose();
-    super.dispose();
-  }
+  return result;
+}
+
+double _distance(WifiPoint a, LatLng b) {
+  final dx = a.latitude - b.latitude;
+  final dy = a.longitude - b.longitude;
+  return sqrt(dx * dx + dy * dy);
 }
