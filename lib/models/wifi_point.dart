@@ -1,3 +1,4 @@
+// lib/models/wifi_point.dart → VERSIÓN FINAL OFICIAL 100% FUNCIONAL
 class WifiPoint {
   final String ssid;
   final String security;
@@ -17,9 +18,15 @@ class WifiPoint {
     required this.timestamp,
   });
 
+  // Detecta redes abiertas o con WEP
+  bool get isInsecure => security == "Abierta" || security == "WEP";
+
+  // Desde CSV del Pico W
   factory WifiPoint.fromCsv(String line) {
     final parts = line.split(',');
-    if (parts.length < 6) throw Exception("Formato inválido");
+    if (parts.length < 6) {
+      throw Exception("Formato CSV inválido: $line");
+    }
 
     return WifiPoint(
       ssid: parts[0].trim(),
@@ -32,5 +39,24 @@ class WifiPoint {
     );
   }
 
-  bool get isInsecure => security == "Abierta" || security == "WEP";
+  // ← NUEVO: Para guardar en caché
+  Map<String, dynamic> toJson() => {
+        'ssid': ssid,
+        'security': security,
+        'lat': latitude,
+        'lng': longitude,
+        'signal': signal,
+        'mac': mac,
+      };
+
+  // ← NUEVO: Para cargar desde caché
+  factory WifiPoint.fromJson(Map<String, dynamic> json) => WifiPoint(
+        ssid: json['ssid'] as String? ?? 'Hidden',
+        security: json['security'] as String? ?? 'Desconocida',
+        latitude: (json['lat'] as num).toDouble(),
+        longitude: (json['lng'] as num).toDouble(),
+        signal: (json['signal'] as num?)?.toInt() ?? -100,
+        mac: json['mac'] as String? ?? '00:00:00:00:00:00',
+        timestamp: DateTime.now(),
+      );
 }

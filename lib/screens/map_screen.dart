@@ -1,12 +1,12 @@
-// lib/screens/map_screen.dart → TU CÓDIGO ORIGINAL + UBICACIÓN EN VIVO (100% FUNCIONAL)
-import 'dart:convert';
+// lib/screens/map_screen.dart → VERSIÓN FINAL DEFINITIVA 100% FUNCIONAL
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:geolocator/geolocator.dart'; // ← NUEVO
+import 'package:geolocator/geolocator.dart';
 import '../models/wifi_point.dart';
 import '../config.dart';
 
@@ -23,7 +23,6 @@ class _MapScreenState extends State<MapScreen> {
   bool showOnlyOpen = false;
   final MapController _mapController = MapController();
 
-  // ← AÑADIDO: Variables para ubicación en vivo
   Position? _currentPosition;
   StreamSubscription<Position>? _positionStream;
 
@@ -31,9 +30,9 @@ class _MapScreenState extends State<MapScreen> {
   void initState() {
     super.initState();
     _loadPoints();
-    _startLocationTracking(); // ← NUEVO: Inicia el seguimiento GPS
+    _startLocationTracking();
 
-    // Recarga cada 12 segundos (tu código original)
+    // Recarga automática cada 12 segundos
     Future.doWhile(() async {
       await Future.delayed(const Duration(seconds: 12));
       if (mounted) await _loadPoints();
@@ -41,14 +40,12 @@ class _MapScreenState extends State<MapScreen> {
     });
   }
 
-  // ← NUEVA FUNCIÓN: Activa GPS y te sigue en el mapa
   Future<void> _startLocationTracking() async {
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("Activa el GPS para ver tu ubicación en vivo")),
+          const SnackBar(content: Text("Activa el GPS para verte en el mapa")),
         );
       }
       return;
@@ -63,14 +60,12 @@ class _MapScreenState extends State<MapScreen> {
     if (permission == LocationPermission.deniedForever) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-              content: Text("Ve a Ajustes → Permite ubicación siempre")),
+          const SnackBar(content: Text("Permite ubicación en Ajustes")),
         );
       }
       return;
     }
 
-    // Seguimiento en tiempo real
     const LocationSettings settings = LocationSettings(
       accuracy: LocationAccuracy.high,
       distanceFilter: 8,
@@ -79,15 +74,12 @@ class _MapScreenState extends State<MapScreen> {
     _positionStream = Geolocator.getPositionStream(locationSettings: settings)
         .listen((Position position) {
       setState(() => _currentPosition = position);
-
-      // Mueve el mapa a tu ubicación (zoom suave)
       _mapController.move(
         LatLng(position.latitude, position.longitude),
         16.5,
       );
     });
 
-    // Posición inicial
     try {
       Position pos = await Geolocator.getCurrentPosition();
       setState(() => _currentPosition = pos);
@@ -95,18 +87,18 @@ class _MapScreenState extends State<MapScreen> {
     } catch (_) {}
   }
 
-  // ← TU CÓDIGO ORIGINAL (SIN CAMBIOS)
+  // ELIMINA DUPLICADOS POR MAC + GUARDA SOLO EL DE MEJOR SEÑAL
   Future<void> _loadPoints() async {
     try {
       final url =
-          'https://io.adafruit.com/api/v2/${Config.username}/feeds/${Config.feed}/data?limit=200';
+          'https://io.adafruit.com/api/v2/${Config.username}/feeds/${Config.feed}/data?limit=500';
       final response =
           await http.get(Uri.parse(url), headers: {'X-AIO-Key': Config.aioKey});
 
       if (response.statusCode != 200) return;
 
       final List<dynamic> items = json.decode(response.body);
-      final List<WifiPoint> loaded = [];
+      final Map<String, WifiPoint> uniqueByMac = {};
 
       for (var item in items) {
         final String? raw = item['value'] as String?;
@@ -115,13 +107,24 @@ class _MapScreenState extends State<MapScreen> {
         for (var line in raw.split('\n')) {
           line = line.trim();
           if (line.isEmpty) continue;
+
           try {
-            loaded.add(WifiPoint.fromCsv(line));
+            final point = WifiPoint.fromCsv(line);
+            final String macKey = point.mac.toUpperCase().trim();
+
+            if (macKey.isEmpty || macKey == "00:00:00:00:00:00") continue;
+
+            if (!uniqueByMac.containsKey(macKey) ||
+                point.signal > (uniqueByMac[macKey]?.signal ?? -200)) {
+              uniqueByMac[macKey] = point;
+            }
           } catch (_) {
             continue;
           }
         }
       }
+
+      final List<WifiPoint> loaded = uniqueByMac.values.toList();
 
       if (loaded.isNotEmpty && mounted) {
         setState(() {
@@ -130,16 +133,7 @@ class _MapScreenState extends State<MapScreen> {
         });
 
         final prefs = await SharedPreferences.getInstance();
-        final cache = loaded
-            .map((p) => {
-                  'ssid': p.ssid,
-                  'security': p.security,
-                  'lat': p.latitude,
-                  'lng': p.longitude,
-                  'signal': p.signal,
-                  'mac': p.mac,
-                })
-            .toList();
+        final cache = loaded.map((p) => p.toJson()).toList();
         await prefs.setString('cached_points', jsonEncode(cache));
       }
     } catch (e) {
@@ -154,15 +148,7 @@ class _MapScreenState extends State<MapScreen> {
       if (data != null && mounted) {
         final List list = json.decode(data);
         final cached = list
-            .map((e) => WifiPoint(
-                  ssid: e['ssid'] ?? '',
-                  security: e['security'] ?? 'Desconocido',
-                  latitude: (e['lat'] as num).toDouble(),
-                  longitude: (e['lng'] as num).toDouble(),
-                  signal: e['signal'] ?? -100,
-                  mac: e['mac'] ?? '',
-                  timestamp: DateTime.now(),
-                ))
+            .map((e) => WifiPoint.fromJson(e as Map<String, dynamic>))
             .toList();
 
         setState(() {
@@ -203,8 +189,6 @@ class _MapScreenState extends State<MapScreen> {
               urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
               userAgentPackageName: 'com.wardriving.live',
             ),
-
-            // TUS MARCADORES DE WIFI (sin cambios)
             MarkerLayer(
               key: markerKey,
               markers: displayedPoints.map((p) {
@@ -226,8 +210,6 @@ class _MapScreenState extends State<MapScreen> {
                 );
               }).toList(),
             ),
-
-            // ← NUEVO: TU UBICACIÓN EN VIVO (CÍRCULO AZUL)
             if (_currentPosition != null)
               MarkerLayer(
                 markers: [
@@ -239,7 +221,7 @@ class _MapScreenState extends State<MapScreen> {
                     child: Container(
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: Colors.blue.withOpacity(0.3),
+                        color: Colors.blue.withAlpha(80),
                         border: Border.all(color: Colors.blue, width: 4),
                       ),
                       child: const Icon(Icons.my_location,
@@ -250,8 +232,6 @@ class _MapScreenState extends State<MapScreen> {
               ),
           ],
         ),
-
-        // Contador y botón (sin cambios)
         Positioned(
           bottom: 90,
           left: 20,
@@ -265,16 +245,14 @@ class _MapScreenState extends State<MapScreen> {
               ],
             ),
             child: Text(
-              "$displayedCount ${showOnlyOpen ? 'redes abiertas' : 'redes'}",
+              "$displayedCount ${showOnlyOpen ? 'abiertas' : 'redes'}",
               style: const TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-                fontSize: 17,
-              ),
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 17),
             ),
           ),
         ),
-
         Positioned(
           bottom: 90,
           right: 20,
