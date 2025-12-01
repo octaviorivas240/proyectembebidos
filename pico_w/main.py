@@ -1,4 +1,4 @@
-# main.py → OPTIMIZADO PARA ADAFRUIT IO FREE (NUNCA TE BLOQUEAN)
+# main.py → SÓLO GUARDA Y ENVÍA CUANDO HAYA GPS FIX REAL (MAPA 100% LIMPIO)
 from machine import UART, Pin
 import machine
 import time
@@ -29,18 +29,15 @@ led = Pin("LED", Pin.OUT)
 
 SECURITY = {0: "Abierta", 1: "WEP", 3: "WPA-PSK", 5: "WPA2-PSK", 7: "WPA/WPA2-PSK"}
 PENDING_DIR = "pending"
+lote_acumulado = ""
+ultimo_envio = 0
+INTERVALO_ENVIO = 120  # 2 minutos máximo (Adafruit Free
 
-# Crear carpeta pending
 try:
     if PENDING_DIR not in uos.listdir():
         uos.mkdir(PENDING_DIR)
 except:
     pass
-
-# ===================== VARIABLES GLOBALES =====================
-lote_acumulado = ""           # ← ACUMULA TODAS LAS REDES
-ultimo_envio = 0              # ← Control de tiempo (2 minutos = 120 segundos)
-INTERVALO_ENVIO = 120         # ← 2 MINUTOS = 120 SEGUNDOS (PERFECTO PARA FREE)
 
 # ===================== FUNCIONES =====================
 def conectar_wifi():
@@ -58,17 +55,22 @@ def conectar_wifi():
     print("\nSin internet")
     return False
 
-def obtener_gps():
-    timeout = time.ticks_ms() + 30000
+# FUNCIÓN CLAVE: ESPERA GPS REAL (máximo 20 segundos)
+def esperar_gps_fix():
+    print("Esperando GPS fix...", end="")
+    timeout = time.ticks_ms() + 20000  # 20 segundos máximo
     while time.ticks_ms() < timeout:
         if gps_uart.any():
             data = gps_uart.read()
             if data:
                 for b in data:
-                    gps.update(chr(b))
-        if gps.satellites_in_use >= 4 and gps.latitude[0] != 0.0:
-            return True
-        time.sleep(0.1)
+                    stat = gps.update(chr(b))
+                    if stat:  # gps.update devuelve algo cuando hay frase completa
+                        if gps.satellites_in_use >= 4 and gps.latitude[0] != 0.0:
+                            print(f"\nGPS FIX! → {gps.latitude[0]:.6f}, {gps.longitude[0]:.6f}")
+                            return True
+        time.sleep(0.05)
+    print("\nSin GPS fix → ciclo omitido")
     return False
 
 def guardar_local(datos):
@@ -82,8 +84,7 @@ def guardar_local(datos):
         print("ERROR guardando:", e)
 
 def enviar_a_adafruit(datos):
-    if not wlan.isconnected() or len(datos) == 0:
-        return False
+    if not wlan.isconnected() or not datos.strip(): return False
     try:
         addr = usocket.getaddrinfo('io.adafruit.com', 443)[0][-1]
         s = usocket.socket()
@@ -92,23 +93,21 @@ def enviar_a_adafruit(datos):
         s = ssl.wrap_socket(s)
 
         payload = ujson.dumps({"value": datos})
-        if len(payload) > 1000:  # ← 1KB límite
-            print("Lote muy grande, se recorta")
-            datos = "\n".join(datos.split("\n")[:50])  # máx 50 redes por envío
+        if len(payload) > 950:  # seguridad por límite 1KB
+            datos = "\n".join(datos.split("\n")[:60])
             payload = ujson.dumps({"value": datos})
 
-        request = (
-            f"POST /api/v2/{aio_user}/feeds/{feed}/data HTTP/1.1\r\n"
-            f"Host: io.adafruit.com\r\n"
-            f"X-AIO-Key: {aio_key}\r\n"
-            f"Content-Type: application/json\r\n"
-            f"Content-Length: {len(payload)}\r\n"
-            f"Connection: close\r\n\r\n"
-            f"{payload}"
-        )
+        request = f"POST /api/v2/{aio_user}/feeds/{feed}/data HTTP/1.1\r\n"
+        request += f"Host: io.adafruit.com\r\n"
+        request += f"X-AIO-Key: {aio_key}\r\n"
+        request += f"Content-Type: application/json\r\n"
+        request += f"Content-Length: {len(payload)}\r\n"
+        request += f"Connection: close\r\n\r\n"
+        request += payload
+
         s.write(request.encode())
         s.close()
-        print(f"ENVIADO LOTE DE {datos.count(chr(10))+1} REDES")
+        print(f"ENVIADO {datos.count(chr(10))+1} redes con GPS real")
         return True
     except Exception as e:
         print("Error enviando:", e)
@@ -117,8 +116,8 @@ def enviar_a_adafruit(datos):
 def enviar_pendientes():
     if not wlan.isconnected(): return
     try:
-        archivos = [f for f in uos.listdir(PENDING_DIR) if f.endswith(".txt")]
-        for archivo in archivos:
+        for archivo in uos.listdir(PENDING_DIR):
+            if not archivo.endswith(".txt"): continue
             path = f"{PENDING_DIR}/{archivo}"
             with open(path, "r") as f:
                 datos = f.read()
@@ -128,24 +127,18 @@ def enviar_pendientes():
     except Exception as e:
         print("Error enviando pendientes:", e)
 
-def escanear_y_acumular():
+def ciclo_wardriving():
     global lote_acumulado, ultimo_envio
 
-    print("\n--- Escaneando ---")
+    # CLAVE: SI NO HAY GPS FIX → NO HACEMOS NADA ESTE CICLO
+    if not esperar_gps_fix():
+        return  # ← se salta todo el ciclo si no hay GPS
+
+    lat = f"{gps.latitude[0]:.6f}"
+    lon = f"{gps.longitude[0]:.6f}"
+
+    print("--- Escaneando con GPS real ---")
     redes = wlan.scan()
-    if not redes:
-        print("No hay redes")
-        return
-
-    print("GPS...", end="")
-    if obtener_gps():
-        lat = f"{gps.latitude[0]:.6f}"
-        lon = f"{gps.longitude[0]:.6f}"
-        print(f" OK → {lat},{lon}")
-    else:
-        lat = lon = "0.000000"
-        print(" sin fix")
-
     lote_nuevo = ""
     for net in redes:
         ssid = net[0].decode('utf-8', 'ignore').strip() or "Hidden"
@@ -155,15 +148,15 @@ def escanear_y_acumular():
         lote_nuevo += f"{ssid},{auth},{lat},{lon},{rssi},{mac}\n"
 
     lote_acumulado += lote_nuevo
-    print(f"Acumulado: {lote_acumulado.count(chr(10))+1} redes totales")
+    print(f"Acumuladas: {lote_acumulado.count(chr(10))} redes con GPS")
 
-    # ENVÍO CADA 2 MINUTOS O SI HAY MUCHO ACUMULADO
+    # ENVÍO CADA 2 MIN O SI HAY MUCHAS
     ahora = time.time()
     if (ahora - ultimo_envio >= INTERVALO_ENVIO) or (lote_acumulado.count("\n") > 80):
         if wlan.isconnected():
-            enviar_pendientes()  # primero lo viejo
+            enviar_pendientes()
             if enviar_a_adafruit(lote_acumulado.strip()):
-                lote_acumulado = ""    # ← LIMPIAR ACUMULADO
+                lote_acumulado = ""
                 ultimo_envio = time.time()
             else:
                 guardar_local(lote_acumulado.strip())
@@ -173,19 +166,19 @@ def escanear_y_acumular():
             lote_acumulado = ""
 
 # ===================== INICIO =====================
-print("=== WARDRIVING MÉXICO 2025 - OPTIMIZADO PARA ADAFRUIT FREE ===")
-print("Envío cada 2 minutos máximo → NUNCA TE BLOQUEAN")
+print("=== WARDRIVING MÉXICO 2025 - SOLO GPS REAL ===")
+print("No guarda ni envía nada sin fix → mapa 100% limpio")
 conectar_wifi()
 
 while True:
     start = time.ticks_ms()
 
-    # GPS continuo
+    # GPS en tiempo real (siempre leyendo)
     while gps_uart.any():
         b = gps_uart.read(1)
         if b: gps.update(chr(b[0]))
 
-    escanear_y_acumular()
+    ciclo_wardriving()
 
     led.on(); time.sleep(0.3); led.off()
 
